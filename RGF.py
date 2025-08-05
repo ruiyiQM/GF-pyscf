@@ -15,8 +15,19 @@ class RGF:
         GTOval = 'GTOval'        
         ao = self.mol.eval_gto(GTOval, grid)
         orb_on_grid = np.dot(ao, self.mo_coeff)
-
         return orb_on_grid.flatten()
+
+    def get_MO_grid_grad(self, grid):
+        GTOval = 'GTOval_sph_deriv1'        
+        ao = self.mol.eval_gto(GTOval, grid)[1:]
+        orb_on_grid = np.dot(ao, self.mo_coeff)
+        return orb_on_grid.reshape(3,-1)
+    
+    def get_MO_grid_value_and_grad(self, grid):
+        GTOval = 'GTOval_sph_deriv1'        
+        ao = self.mol.eval_gto(GTOval, grid)
+        orb_on_grid = np.dot(ao, self.mo_coeff)
+        return orb_on_grid.reshape(4,-1)
     
     def get_GF_grid(self, grid1, grad2, tau = 0.0, index = None ):
 
@@ -36,8 +47,30 @@ class RGF:
                 gf_on_grid += np.exp(-(self.mo_energy[i])* tau) * mo_grid1[i] * mo_grid2[i]
         return gf_on_grid
         
-        
+    def get_GF_value_and_grad(self, grid1, grad2, tau = 0.0, index = None ):
 
+
+
+        mo_grid1 = self.get_MO_grid_value_and_grad(grid1)
+        mo_grid2 = self.get_MO_grid(grad2)    
+        if index is None:
+            index = np.arange(self.mo_occ.shape[0]) 
+        factor = np.exp(-(self.mo_energy) * tau)
+
+        gf = np.einsum('j,ij,j->i',factor[index], mo_grid1[:,index].conj(), mo_grid2[index])
+    
+        return gf[0], gf[1:]
+
+    def get_GF_value_tau_grad(self, grid1, grad2, tau = 0.0, index = None ):
+
+        mo_grid1 = self.get_MO_grid(grid1)
+        mo_grid2 = self.get_MO_grid(grad2)
+        if index is None:
+            index = np.arange(self.mo_occ.shape[0]) 
+        factor = np.exp(-(self.mo_energy) * tau) * (-self.mo_energy)
+        gf_grad =np.dot (factor[index] * mo_grid1[index].conj(), mo_grid2[index])
+        return gf_grad 
+    
 if __name__ == "__main__":
 
     import matplotlib.pyplot as plt
@@ -46,7 +79,7 @@ if __name__ == "__main__":
         H 0.000000 0.000000 0.000000
         H 0.000000 0.000000 1.500000
         ''',
-        basis='6-311g**',
+        basis='aug-ccpvdz',
         unit="Bohr",
         charge = 1,
         spin = 1
@@ -54,22 +87,19 @@ if __name__ == "__main__":
     mf = scf.RHF(mol)
     
     mf.kernel()
-    print (mf.mo_energy)
     rgf = RGF(mf)
     grid = np.asarray([[0.0, 0.0, 1.5]])  # Example grid points reshaped to 2D
+    grid1 = np.asarray([[0.0, 0.0, 1.6]])  # Example grid points reshaped to 2D
     mo_grid = rgf.get_MO_grid(grid)
-    print("Molecular Orbitals on Grid Points:", mo_grid)
+    print("Molecular Orbitals on Grid Points:", mo_grid.shape)
+
+    mo_grid_grad = rgf.get_MO_grid_grad(grid)
+    print("Molecular Orbitals Gradient on Grid Points:", mo_grid_grad.shape)
 
 
-    grid1 = np.asarray([[0.0, 0.0, 10.0]])  # Grid for first set of orbitals
-    print (rgf.get_GF_grid(grid1, grid1, tau=0.1))
-    print (rgf.get_GF_grid(grid, grid, tau=0.1))
-    print (rgf.get_GF_grid(grid1, grid, tau=0.1))
-    
-    # Example usage of get_GF_grid
-    GF=[]
-    
-    for t in range(0,100):
-        GF.append(rgf.get_GF_grid(grid1, grid, tau=0.1*t))
-    plt.plot(np.abs(GF))
-    plt.show()
+    print (rgf.get_GF_grid(grid, grid1, tau = 0.0))
+    gf_value, gf_grad = rgf.get_GF_value_and_grad(grid, grid1, tau = 0.0)
+    print("GF Value on Grid Points:", gf_value, gf_grad)
+
+    tau_grad = rgf.get_GF_value_tau_grad(grid, grid1, tau = 0.0)
+    print ("GF Value and Gradient with Tau:", tau_grad)
